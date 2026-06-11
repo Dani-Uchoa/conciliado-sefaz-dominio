@@ -4,7 +4,7 @@ import re
 import unicodedata
 import io
 
-st.set_page_config(page_title="Conciliador Fiscal - Resiliência Total", layout="wide")
+st.set_page_config(page_title="Conciliador Fiscal - Sefaz x Dominio", layout="wide")
 st.title("⚖️ Conciliador Fiscal: SEFAZ x Domínio")
 
 # --- UTILITÁRIOS ---
@@ -99,9 +99,10 @@ def ler_planilha(file, sistema):
         col_n, col_d, col_v = -1, -1, -1
         idx_inicio = -1
 
-        termos_n = ["NUMERO DO DOCUMENTO FISCAL", "N NF-E", "NUM NFE", "NUMERO", "DOC", "N NF", "NOTA", "CHAVE DE ACESSO", "CHAVE"]
-        termos_d = ["DATA DA EMISSAO", "DATA DE EMISSAO", "DATA EMISSAO", "EMISSAO", "DATA", "DT.", "DATA DE EMISSAO"]
-        termos_v = ["VALOR TOTAL", "VALOR NF-E", "VALOR", "VLR CONTABIL", "VALOR CONTABIL", "TOTAL", "CONTABIL", "VALOR R$"]
+        # Dicionário forçado com os nomes exatos passados
+        termos_n = ["CHAVE DE ACESSO", "NUMERO DO DOCUMENTO FISCAL", "N NF-E", "NUM NFE", "NUMERO", "DOC", "N NF", "NOTA", "CHAVE"]
+        termos_d = ["DATA DE EMISSAO", "DATA DA EMISSAO", "DATA EMISSAO", "EMISSAO", "DATA", "DT."]
+        termos_v = ["VALOR R$", "VALOR TOTAL", "VALOR NF-E", "VALOR", "VLR CONTABIL", "VALOR CONTABIL", "TOTAL", "CONTABIL"]
 
         for i in range(min(len(df), 400)):
             linha = [normalizar(c) for c in df.iloc[i]]
@@ -117,11 +118,14 @@ def ler_planilha(file, sistema):
                             t_n = idx; break
                 
                 if t_n != -1:
-                    col_n, col_d, col_v = t_n, t_d, t_v
-                    idx_inicio = i; break
+                    # Trava de segurança para impedir colunas sobrepostas na leitura "esmagada" do Excel
+                    if len(set([t_n, t_d, t_v])) == 3:
+                        col_n, col_d, col_v = t_n, t_d, t_v
+                        idx_inicio = i; break
 
         if idx_inicio == -1:
-            return None, f"Colunas essenciais (Chave/Nota, Data ou Valor) não foram mapeadas."
+            amostra = " | ".join([str(c) for c in df.iloc[0].tolist()[:3]]) if len(df) > 0 else "Planilha Vazia"
+            return None, f"Colunas não mapeadas. O Excel agrupou tudo em uma só coluna? O programa leu a linha 1 assim: {amostra}"
 
         dados = df.iloc[idx_inicio + 1:].copy()
         res = pd.DataFrame()
@@ -140,8 +144,8 @@ st.warning(
     "⚠️ **INSTRUÇÃO IMPORTANTE**\n\n"
     "Para evitar erros de leitura, prefira inserir arquivos no formato Excel verdadeiro. Se um arquivo falhar:\n"
     "1. Abra a planilha original no **Excel**.\n"
-    "2. Clique em **Arquivo > Salvar Como**.\n"
-    "3. Escolha o tipo **Pasta de Trabalho do Excel (*.xlsx)** e salve.\n"
+    "2. Selecione a primeira coluna e vá em Dados > Texto para Colunas (se os dados estiverem grudados).\n"
+    "3. Clique em **Arquivo > Salvar Como** no tipo **Pasta de Trabalho do Excel (*.xlsx)**.\n"
     "4. Faça o upload do novo arquivo gerado."
 )
 
