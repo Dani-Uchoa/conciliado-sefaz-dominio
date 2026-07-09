@@ -4,8 +4,8 @@ import re
 import unicodedata
 import io
 
-st.set_page_config(page_title="Conciliador Fiscal de Notas", layout="wide")
-st.title("⚖️ Conciliador Fiscal")
+st.set_page_config(page_title="Conciliador Fiscal: SEFAZ x Domínio", layout="wide")
+st.title("⚖️ Conciliador Fiscal: SEFAZ x Domínio")
 
 # --- UTILITÁRIOS ---
 def formatar_moeda_br(valor):
@@ -54,14 +54,11 @@ def encontrar_cabecalho(df):
 def carregar_planilha(f):
     df = pd.read_excel(f, header=None, dtype=str)
     
-    # --- NOVO: Motor de Descompactação Automática ---
-    # Se o Excel tiver esmagado tudo na primeira coluna (A) devido a falhas da SEFAZ
+    # Motor de Descompactação Automática para falhas estruturais da SEFAZ
     if len(df.columns) == 1 or df.iloc[:, 1:].isna().all().all():
         texto_esmagado = df.iloc[:, 0].dropna().astype(str).str.cat(sep='\n')
-        # Descobre se o delimitador oculto é ponto e vírgula ou vírgula
         separador = ';' if ';' in texto_esmagado.split('\n')[0] else ','
         df = pd.read_csv(io.StringIO(texto_esmagado), sep=separador, dtype=str, header=None, engine='python', on_bad_lines='skip')
-    # ------------------------------------------------
     
     idx_cabecalho = encontrar_cabecalho(df)
     
@@ -89,94 +86,106 @@ def processar_dataframe(df, col_nota, col_data, col_valor):
     res = res[res['nota'] != ""].dropna(subset=['data'])
     return res.groupby(['nota', 'data'], as_index=False)['valor'].sum()
 
-# --- INTERFACE ---
-st.warning("⚠️ Salve os arquivos originais em formato **.xlsx** no Excel antes de inserir aqui.")
+# --- INTERFACE GRÁFICA ---
+st.warning("⚠️ **INSTRUÇÃO:** Lembre-se de salvar os arquivos originais em formato **.xlsx** (Pasta de Trabalho do Excel) antes de inseri-los no sistema.")
 
 c1, c2 = st.columns(2)
-with c1: f_arq1 = st.file_uploader("1. Arquivo de Origem (Sefaz, Sieg, etc.) - .xlsx", type=["xlsx", "xls"])
-with c2: f_arq2 = st.file_uploader("2. Arquivo de Destino (Domínio, etc.) - .xlsx", type=["xlsx", "xls"])
+with c1: f_sefaz = st.file_uploader("1. Envie a Planilha da SEFAZ (.xlsx ou .xls)", type=["xlsx", "xls"])
+with c2: f_dom = st.file_uploader("2. Envie a Planilha da DOMÍNIO (.xlsx ou .xls)", type=["xlsx", "xls"])
 
-if f_arq1 and f_arq2:
+if f_sefaz and f_dom:
     try:
-        df_1 = carregar_planilha(f_arq1)
-        df_2 = carregar_planilha(f_arq2)
+        df_s = carregar_planilha(f_sefaz)
+        df_d = carregar_planilha(f_dom)
 
         st.write("---")
-        st.markdown("### ⚙️ Mapeamento de Colunas")
-        st.write("Selecione as colunas correspondentes em cada arquivo. **Você pode usar a Chave de Acesso (44 dígitos) ou o Número da Nota direto.**")
+        st.markdown("### ⚙️ Identificação das Colunas")
+        st.write("O sistema localizou as colunas automaticamente. Caso alguma esteja incorreta, ajuste nas caixas abaixo:")
         
-        cols_1 = list(df_1.columns)
-        def_1_n = next((i for i, c in enumerate(cols_1) if "CHAVE" in normalizar(c) or "NOTA" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
-        def_1_d = next((i for i, c in enumerate(cols_1) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c)), 0)
-        def_1_v = next((i for i, c in enumerate(cols_1) if "VALOR" in normalizar(c) or "TOTAL" in normalizar(c)), 0)
+        # Pré-identificação SEFAZ
+        cols_s = list(df_s.columns)
+        def_s_n = next((i for i, c in enumerate(cols_s) if "CHAVE" in normalizar(c) or "NOTA" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
+        def_s_d = next((i for i, c in enumerate(cols_s) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c)), 0)
+        def_s_v = next((i for i, c in enumerate(cols_s) if "VALOR" in normalizar(c) or "TOTAL" in normalizar(c)), 0)
 
-        cols_2 = list(df_2.columns)
-        def_2_n = next((i for i, c in enumerate(cols_2) if "NOTA" in normalizar(c) or "DOC" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
-        def_2_d = next((i for i, c in enumerate(cols_2) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c)), 0)
-        def_2_v = next((i for i, c in enumerate(cols_2) if "VALOR" in normalizar(c) or "CONTABIL" in normalizar(c)), 0)
+        # Pré-identificação DOMÍNIO
+        cols_d = list(df_d.columns)
+        def_d_n = next((i for i, c in enumerate(cols_d) if "NOTA" in normalizar(c) or "DOC" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
+        def_d_d = next((i for i, c in enumerate(cols_d) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c)), 0)
+        def_d_v = next((i for i, c in enumerate(cols_d) if "VALOR" in normalizar(c) or "CONTABIL" in normalizar(c)), 0)
 
         col1, col2 = st.columns(2)
         with col1:
-            st.info("📄 **Sefaz (Origem)**")
-            s_nota = st.selectbox("Identificador (Chave OU Número da Nota)", cols_1, index=def_1_n, key="s_nota")
-            s_data = st.selectbox("Coluna da Data", cols_1, index=def_1_d, key="s_data")
-            s_valor = st.selectbox("Coluna do Valor", cols_1, index=def_1_v, key="s_valor")
+            st.info("📊 **Colunas da SEFAZ**")
+            s_nota = st.selectbox("Coluna do Número da Nota ou Chave (SEFAZ)", cols_s, index=def_s_n, key="s_nota")
+            s_data = st.selectbox("Coluna da Data de Emissão (SEFAZ)", cols_s, index=def_s_d, key="s_data")
+            s_valor = st.selectbox("Coluna do Valor da Nota (SEFAZ)", cols_s, index=def_s_v, key="s_valor")
         
         with col2:
-            st.info("📄 **Domínio (Destino)**")
-            d_nota = st.selectbox("Identificador (Chave OU Número da Nota)", cols_2, index=def_2_n, key="d_nota")
-            d_data = st.selectbox("Coluna da Data", cols_2, index=def_2_d, key="d_data")
-            d_valor = st.selectbox("Coluna do Valor", cols_2, index=def_2_v, key="d_valor")
+            st.info("📊 **Colunas da DOMÍNIO**")
+            d_nota = st.selectbox("Coluna do Número da Nota (Domínio)", cols_d, index=def_d_n, key="d_nota")
+            d_data = st.selectbox("Coluna da Data (Domínio)", cols_d, index=def_d_d, key="d_data")
+            d_valor = st.selectbox("Coluna do Valor Contábil (Domínio)", cols_d, index=def_d_v, key="d_valor")
 
-        if st.button("🚀 Cruzar Dados Agora", type="primary", use_container_width=True):
-            with st.spinner("Processando..."):
-                ds = processar_dataframe(df_1, s_nota, s_data, s_valor)
-                dd = processar_dataframe(df_2, d_nota, d_data, d_valor)
+        if st.button("🚀 Cruzar Dados e Buscar Divergências", type="primary", use_container_width=True):
+            with st.spinner("Cruzando informações fiscais..."):
+                ds = processar_dataframe(df_s, s_nota, s_data, s_valor)
+                dd = processar_dataframe(df_d, d_nota, d_data, d_valor)
 
+                # Ajuste de datas invertidas (Dia/Mês)
                 for idx, row in dd.iterrows():
                     nota_dom = row['nota']
                     data_dom = row['data']
-                    match_1 = ds[ds['nota'] == nota_dom]
-                    if not match_1.empty:
-                        for idx_sf, row_sf in match_1.iterrows():
+                    match_s = ds[ds['nota'] == nota_dom]
+                    if not match_s.empty:
+                        for idx_sf, row_sf in match_s.iterrows():
                             data_sf = row_sf['data']
                             if data_dom != data_sf and data_dom.day == data_sf.month and data_dom.month == data_sf.day:
                                 dd.at[idx, 'data'] = data_sf
 
                 dd = dd.groupby(['nota', 'data'], as_index=False)['valor'].sum()
-                m = pd.merge(ds, dd, on=['nota', 'data'], how='outer', suffixes=('_arq1', '_arq2')).fillna(0)
+                m = pd.merge(ds, dd, on=['nota', 'data'], how='outer', suffixes=('_sefaz', '_dom')).fillna(0)
                 
-                total_1 = m['valor_arq1'].sum()
-                total_2 = m['valor_arq2'].sum()
-                diferenca_global = total_1 - total_2
+                total_sefaz = m['valor_sefaz'].sum()
+                total_dominio = m['valor_dom'].sum()
+                diferenca_global = total_sefaz - total_dominio
 
                 st.write("---")
-                st.subheader("📊 Resultado Consolidado")
+                st.subheader("📊 Totais Consolidados")
                 met1, met2, met3 = st.columns(3)
-                with met1: st.metric("Valor Total Sefaz", formatar_moeda_br(total_1))
-                with met2: st.metric("Valor Total Domínio", formatar_moeda_br(total_2))
+                with met1: st.metric("Soma Total SEFAZ", formatar_moeda_br(total_sefaz))
+                with met2: st.metric("Soma Total DOMÍNIO", formatar_moeda_br(total_dominio))
                 with met3: st.metric("Diferença Global", formatar_moeda_br(diferenca_global), delta=f"{diferenca_global:,.2f} R$" if abs(diferenca_global) > 0.01 else None, delta_color="inverse" if diferenca_global != 0 else "normal")
 
-                divergencias = m[abs(m['valor_arq1'] - m['valor_arq2']) > 0.01].copy()
-                divergencias.rename(columns={'valor_arq1': 'Valor Arq 1', 'valor_arq2': 'Valor Arq 2', 'nota': 'Identificador (Nota/Chave)', 'data': 'Data'}, inplace=True)
-                divergencias = divergencias.sort_values(by=['Data', 'Identificador (Nota/Chave)'])
-                divergencias['Data'] = pd.to_datetime(divergencias['Data']).dt.strftime('%d/%m/%Y')
-                df_final = divergencias[['Data', 'Identificador (Nota/Chave)', 'Valor Arq 1', 'Valor Arq 2']].reset_index(drop=True)
+                # Filtro de divergências de valores
+                divergencias = m[abs(m['valor_sefaz'] - m['valor_dom']) > 0.01].copy()
                 
-                st.subheader("🔍 Detalhamento das Divergências")
+                # Nomes de colunas amigáveis e de fácil compreensão no resultado final
+                divergencias.rename(columns={
+                    'nota': 'Número da Nota',
+                    'data': 'Data',
+                    'valor_sefaz': 'Valor SEFAZ',
+                    'valor_dom': 'Valor Domínio'
+                }, inplace=True)
+                
+                divergencias = divergencias.sort_values(by=['Data', 'Número da Nota'])
+                divergencias['Data'] = pd.to_datetime(divergencias['Data']).dt.strftime('%d/%m/%Y')
+                df_final = divergencias[['Data', 'Número da Nota', 'Valor SEFAZ', 'Valor Domínio']].reset_index(drop=True)
+                
+                st.subheader("🔍 Detalhamento das Divergências Encontradas")
                 if not df_final.empty:
-                    st.warning(f"Foram identificadas {len(df_final)} notas com inconsistências.")
+                    st.warning(f"Foram identificadas {len(df_final)} notas com inconsistências de valores ou de lançamento.")
                     df_visual = df_final.copy()
-                    df_visual['Valor Arq 1'] = df_visual['Valor Arq 1'].apply(formatar_moeda_br)
-                    df_visual['Valor Arq 2'] = df_visual['Valor Arq 2'].apply(formatar_moeda_br)
+                    df_visual['Valor SEFAZ'] = df_visual['Valor SEFAZ'].apply(formatar_moeda_br)
+                    df_visual['Valor Domínio'] = df_visual['Valor Domínio'].apply(formatar_moeda_br)
                     st.dataframe(df_visual, use_container_width=True)
                     
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        df_final.to_excel(writer, index=False, sheet_name='Divergencias')
+                        df_final.to_excel(writer, index=False, sheet_name='Divergências')
                     
-                    st.download_button("📥 Baixar Planilha", data=output.getvalue(), file_name="divergencias.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    st.download_button("📥 Baixar Planilha de Divergências", data=output.getvalue(), file_name="divergencias_sefaz_dominio.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 else:
-                    st.success("🎉 Excelente! Nenhuma divergência encontrada.")
+                    st.success("🎉 Excelente! Nenhuma divergência individual foi encontrada entre os arquivos.")
     except Exception as e:
-        st.error(f"Erro ao ler os arquivos. Detalhe técnico: {e}")
+        st.error(f"Erro ao processar as planilhas. Detalhe técnico: {e}")
