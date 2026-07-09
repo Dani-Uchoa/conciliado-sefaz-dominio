@@ -117,13 +117,13 @@ if f_arq1 and f_arq2:
 
         col1, col2 = st.columns(2)
         with col1:
-            st.info("📄 **Arquivo 1 (Origem)**")
+            st.info("📄 **Sefaz (Origem)**")
             s_nota = st.selectbox("Identificador (Chave OU Número da Nota)", cols_1, index=def_1_n, key="s_nota")
             s_data = st.selectbox("Coluna da Data", cols_1, index=def_1_d, key="s_data")
             s_valor = st.selectbox("Coluna do Valor", cols_1, index=def_1_v, key="s_valor")
         
         with col2:
-            st.info("📄 **Arquivo 2 (Destino)**")
+            st.info("📄 **Domínio (Destino)**")
             d_nota = st.selectbox("Identificador (Chave OU Número da Nota)", cols_2, index=def_2_n, key="d_nota")
             d_data = st.selectbox("Coluna da Data", cols_2, index=def_2_d, key="d_data")
             d_valor = st.selectbox("Coluna do Valor", cols_2, index=def_2_v, key="d_valor")
@@ -153,8 +153,8 @@ if f_arq1 and f_arq2:
                 st.write("---")
                 st.subheader("📊 Resultado Consolidado")
                 met1, met2, met3 = st.columns(3)
-                with met1: st.metric("Valor Total Arquivo 1", formatar_moeda_br(total_1))
-                with met2: st.metric("Valor Total Arquivo 2", formatar_moeda_br(total_2))
+                with met1: st.metric("Valor Total Sefaz", formatar_moeda_br(total_1))
+                with met2: st.metric("Valor Total Domínio", formatar_moeda_br(total_2))
                 with met3: st.metric("Diferença Global", formatar_moeda_br(diferenca_global), delta=f"{diferenca_global:,.2f} R$" if abs(diferenca_global) > 0.01 else None, delta_color="inverse" if diferenca_global != 0 else "normal")
 
                 divergencias = m[abs(m['valor_arq1'] - m['valor_arq2']) > 0.01].copy()
