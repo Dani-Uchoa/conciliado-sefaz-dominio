@@ -53,10 +53,11 @@ def encontrar_cabecalho(df):
         if matches >= 2: return i
     return 0
 
-# --- MOTOR DE LEITURA BLINDADO POR ASSINATURA HEXADECIMAL ---
+# --- MOTOR DE LEITURA COM RESILIÊNCIA SILENCIOSA ---
 def carregar_planilha(f):
     f.seek(0)
     conteudo = f.read()
+    df = None
     
     if f.name.lower().endswith('.csv'):
         try: texto = conteudo.decode('utf-8')
@@ -66,26 +67,27 @@ def carregar_planilha(f):
         df = pd.read_csv(io.StringIO(texto), sep=separador, dtype=str, header=None, engine='python', on_bad_lines='skip')
         
     else:
-        # Checagem de Assinatura Binária (Evita ler XLS como Texto)
         is_real_xls = conteudo.startswith(b'\xD0\xCF\x11\xE0')
         is_real_xlsx = conteudo.startswith(b'PK')
         
+        sucesso_excel = False
         if is_real_xls or is_real_xlsx:
             motor = 'openpyxl' if is_real_xlsx else 'xlrd'
             try:
-                # Isola na memória com io.BytesIO para evitar corrupção de leitura
                 df = pd.read_excel(io.BytesIO(conteudo), header=None, dtype=str, engine=motor)
+                sucesso_excel = True
                 
                 if len(df.columns) == 1 or df.iloc[:, 1:].isna().all().all():
                     texto_esmagado = df.iloc[:, 0].dropna().astype(str).str.cat(sep='\n')
                     if texto_esmagado.strip():
                         separador = ';' if ';' in texto_esmagado.split('\n')[0] else ','
                         df = pd.read_csv(io.StringIO(texto_esmagado), sep=separador, dtype=str, header=None, engine='python', on_bad_lines='skip')
-            except Exception as e:
-                st.error(f"Falha do motor '{motor}' ao processar o arquivo genuíno {f.name}: {e}")
-                return pd.DataFrame()
-        else:
-            # Arquivos disfarçados de XLS (HTML ou delimitador solto)
+            except Exception:
+                # Se falhar internamente (arquivo corrompido pela Domínio), desiste do formato Excel silenciosamente.
+                sucesso_excel = False
+        
+        # Se não era Excel, ou se era e falhou, entra nas contingências brutas
+        if not sucesso_excel:
             try:
                 dfs = pd.read_html(io.BytesIO(conteudo))
                 df = dfs[0].astype(str)
@@ -98,7 +100,7 @@ def carregar_planilha(f):
                 else: sep = ','
                 df = pd.read_csv(io.StringIO(texto), sep=sep, dtype=str, header=None, engine='python', on_bad_lines='skip')
     
-    if df.empty:
+    if df is None or df.empty:
         return pd.DataFrame()
         
     idx_cabecalho = encontrar_cabecalho(df)
@@ -143,7 +145,7 @@ if f_sefaz and f_dom:
         df_d = carregar_planilha(f_dom)
 
         if df_s.empty or df_d.empty:
-            st.error("Falha ao ler os dados estruturais de uma ou ambas as planilhas. Verifique a formatação do documento original.")
+            st.error("Falha ao ler os dados estruturais de uma ou ambas as planilhas. Certifique-se de que o arquivo contém tabelas de dados válidas.")
         else:
             st.write("---")
             st.markdown("### ⚙️ Identificação das Colunas")
