@@ -100,7 +100,7 @@ def processar_dataframe(df, col_nota, col_data, col_valor):
     return res.groupby(['nota', 'data'], as_index=False)['valor'].sum()
 
 # --- INTERFACE GRÁFICA ---
-st.info("💡 **Dica:** O sistema aceita arquivos originais em formato **.xlsx, .xls ou .csv**.")
+st.info("💡 **Dica:** O sistema aceita arquivos originais em formato **.xlsx, .xls ou .csv**, lembrar de Salvar Como antes de anexar.")
 
 c1, c2 = st.columns(2)
 with c1: f_sefaz = st.file_uploader("1. Envie a Planilha da SEFAZ", type=["xlsx", "xls", "csv"])
