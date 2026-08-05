@@ -53,30 +53,48 @@ def encontrar_cabecalho(df):
         if matches >= 2: return i
     return 0
 
+# --- NOVO MOTOR DE LEITURA (Anti-Falsificação de Extensão) ---
 def carregar_planilha(f):
     f.seek(0)
+    conteudo = f.read()
     
+    # 1. Arquivo CSV Legítimo
     if f.name.lower().endswith('.csv'):
-        conteudo = f.read()
-        try:
-            texto = conteudo.decode('utf-8')
-        except UnicodeDecodeError:
-            texto = conteudo.decode('latin1', errors='replace')
-            
-        primeira_linha = texto.split('\n')[0] if '\n' in texto else texto
-        separador = ';' if ';' in primeira_linha else ','
+        try: texto = conteudo.decode('utf-8')
+        except UnicodeDecodeError: texto = conteudo.decode('latin1', errors='replace')
+        separador = ';' if ';' in texto.split('\n')[0] else ','
         df = pd.read_csv(io.StringIO(texto), sep=separador, dtype=str, header=None, engine='python', on_bad_lines='skip')
+        
     else:
-        df = pd.read_excel(f, header=None, dtype=str)
-        if len(df.columns) == 1 or df.iloc[:, 1:].isna().all().all():
-            texto_esmagado = df.iloc[:, 0].dropna().astype(str).str.cat(sep='\n')
-            separador = ';' if ';' in texto_esmagado.split('\n')[0] else ','
-            df = pd.read_csv(io.StringIO(texto_esmagado), sep=separador, dtype=str, header=None, engine='python', on_bad_lines='skip')
+        # 2. Tenta ler como Excel Verdadeiro
+        try:
+            f.seek(0)
+            df = pd.read_excel(f, header=None, dtype=str)
+            # Motor de Descompactação da SEFAZ
+            if len(df.columns) == 1 or df.iloc[:, 1:].isna().all().all():
+                texto_esmagado = df.iloc[:, 0].dropna().astype(str).str.cat(sep='\n')
+                separador = ';' if ';' in texto_esmagado.split('\n')[0] else ','
+                df = pd.read_csv(io.StringIO(texto_esmagado), sep=separador, dtype=str, header=None, engine='python', on_bad_lines='skip')
+        
+        except Exception:
+            # 3. ARQUIVO FALSO DO DOMÍNIO (HTML disfarçado de XLS)
+            try:
+                dfs = pd.read_html(io.BytesIO(conteudo))
+                df = dfs[0]
+                df = df.astype(str)
+            except Exception:
+                # 4. ARQUIVO FALSO DO DOMÍNIO (Texto delimitado disfarçado de XLS)
+                try: texto = conteudo.decode('utf-8')
+                except UnicodeDecodeError: texto = conteudo.decode('latin1', errors='replace')
+                
+                if '\t' in texto: sep = '\t'
+                elif ';' in texto: sep = ';'
+                else: sep = ','
+                df = pd.read_csv(io.StringIO(texto), sep=sep, dtype=str, header=None, engine='python', on_bad_lines='skip')
     
     idx_cabecalho = encontrar_cabecalho(df)
     
     nomes_colunas = [str(c).strip() if pd.notna(c) else f"Coluna_{i}" for i, c in enumerate(df.iloc[idx_cabecalho])]
-    
     vistos = {}
     nomes_unicos = []
     for nome in nomes_colunas:
@@ -100,7 +118,7 @@ def processar_dataframe(df, col_nota, col_data, col_valor):
     return res.groupby(['nota', 'data'], as_index=False)['valor'].sum()
 
 # --- INTERFACE GRÁFICA ---
-st.info("💡 **Dica:** O sistema aceita arquivos originais em formato **.xlsx, .xls ou .csv**, lembrar de Salvar Como antes de anexar.")
+st.info("💡 **Dica:** O sistema aceita arquivos baixados diretamente dos portais, não é necessário fazer 'Salvar Como'.")
 
 c1, c2 = st.columns(2)
 with c1: f_sefaz = st.file_uploader("1. Envie a Planilha da SEFAZ", type=["xlsx", "xls", "csv"])
@@ -113,7 +131,6 @@ if f_sefaz and f_dom:
 
         st.write("---")
         st.markdown("### ⚙️ Identificação das Colunas")
-        st.write("O sistema localizou as colunas automaticamente. Caso alguma esteja incorreta, ajuste nas caixas abaixo:")
         
         cols_s = list(df_s.columns)
         def_s_n = next((i for i, c in enumerate(cols_s) if "CHAVE" in normalizar(c) or "NOTA" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
