@@ -1,4 +1,4 @@
-import streamlit as st
+",import streamlit as st
 import pandas as pd
 import re
 import unicodedata
@@ -53,7 +53,7 @@ def encontrar_cabecalho(df):
         if matches >= 2: return i
     return 0
 
-# --- MOTOR DE LEITURA COM RESILIÊNCIA SILENCIOSA ---
+# --- MOTOR DE LEITURA COM BLOQUEIO DE CORRUPÇÃO ---
 def carregar_planilha(f):
     f.seek(0)
     conteudo = f.read()
@@ -67,27 +67,27 @@ def carregar_planilha(f):
         df = pd.read_csv(io.StringIO(texto), sep=separador, dtype=str, header=None, engine='python', on_bad_lines='skip')
         
     else:
+        # Checagem de Assinatura Binária
         is_real_xls = conteudo.startswith(b'\xD0\xCF\x11\xE0')
         is_real_xlsx = conteudo.startswith(b'PK')
         
-        sucesso_excel = False
         if is_real_xls or is_real_xlsx:
             motor = 'openpyxl' if is_real_xlsx else 'xlrd'
             try:
                 df = pd.read_excel(io.BytesIO(conteudo), header=None, dtype=str, engine=motor)
-                sucesso_excel = True
                 
+                # Motor de Descompactação SEFAZ
                 if len(df.columns) == 1 or df.iloc[:, 1:].isna().all().all():
                     texto_esmagado = df.iloc[:, 0].dropna().astype(str).str.cat(sep='\n')
                     if texto_esmagado.strip():
                         separador = ';' if ';' in texto_esmagado.split('\n')[0] else ','
                         df = pd.read_csv(io.StringIO(texto_esmagado), sep=separador, dtype=str, header=None, engine='python', on_bad_lines='skip')
             except Exception:
-                # Se falhar internamente (arquivo corrompido pela Domínio), desiste do formato Excel silenciosamente.
-                sucesso_excel = False
-        
-        # Se não era Excel, ou se era e falhou, entra nas contingências brutas
-        if not sucesso_excel:
+                # INTERVENÇÃO DIRETA: Impede leitura forçada de binário quebrado
+                st.error(f"🛑 **ARQUIVO CORROMPIDO NA ORIGEM:** O arquivo '{f.name}' exportado pelo sistema (Domínio/Outros) possui defeitos na matriz binária. \n\nPara garantir a integridade da conciliação, abra este arquivo no Excel do seu computador e selecione **'Salvar Como -> Pasta de Trabalho do Excel (.xlsx)'** antes de enviar.")
+                return pd.DataFrame()
+        else:
+            # Fake XLS (Disfarçado de HTML ou Texto)
             try:
                 dfs = pd.read_html(io.BytesIO(conteudo))
                 df = dfs[0].astype(str)
@@ -133,7 +133,7 @@ def processar_dataframe(df, col_nota, col_data, col_valor):
     return res.groupby(['nota', 'data'], as_index=False)['valor'].sum()
 
 # --- INTERFACE GRÁFICA ---
-st.info("💡 **Dica:** O sistema aceita arquivos baixados diretamente dos portais, não é necessário fazer 'Salvar Como'.")
+st.info("💡 **Atenção:** Arquivos defeituosos da Domínio exigem reparo no Excel (Salvar Como .xlsx).")
 
 c1, c2 = st.columns(2)
 with c1: f_sefaz = st.file_uploader("1. Envie a Planilha da SEFAZ", type=["xlsx", "xls", "csv"])
@@ -144,9 +144,7 @@ if f_sefaz and f_dom:
         df_s = carregar_planilha(f_sefaz)
         df_d = carregar_planilha(f_dom)
 
-        if df_s.empty or df_d.empty:
-            st.error("Falha ao ler os dados estruturais de uma ou ambas as planilhas. Certifique-se de que o arquivo contém tabelas de dados válidas.")
-        else:
+        if not df_s.empty and not df_d.empty:
             st.write("---")
             st.markdown("### ⚙️ Identificação das Colunas")
             
