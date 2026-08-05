@@ -9,7 +9,9 @@ st.title("⚖️ Conciliador Fiscal: SEFAZ x Domínio")
 
 # --- UTILITÁRIOS ---
 def formatar_moeda_br(valor):
-    return f"R$ {valor:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    s = f"{valor:_.2f}"
+    s = s.replace('.', ',').replace('_', '.')
+    return f"R$ {s}"
 
 def normalizar(txt):
     if pd.isna(txt): return ""
@@ -52,13 +54,24 @@ def encontrar_cabecalho(df):
     return 0
 
 def carregar_planilha(f):
-    df = pd.read_excel(f, header=None, dtype=str)
+    f.seek(0)
     
-    # Motor de Descompactação Automática para falhas estruturais da SEFAZ
-    if len(df.columns) == 1 or df.iloc[:, 1:].isna().all().all():
-        texto_esmagado = df.iloc[:, 0].dropna().astype(str).str.cat(sep='\n')
-        separador = ';' if ';' in texto_esmagado.split('\n')[0] else ','
-        df = pd.read_csv(io.StringIO(texto_esmagado), sep=separador, dtype=str, header=None, engine='python', on_bad_lines='skip')
+    if f.name.lower().endswith('.csv'):
+        conteudo = f.read()
+        try:
+            texto = conteudo.decode('utf-8')
+        except UnicodeDecodeError:
+            texto = conteudo.decode('latin1', errors='replace')
+            
+        primeira_linha = texto.split('\n')[0] if '\n' in texto else texto
+        separador = ';' if ';' in primeira_linha else ','
+        df = pd.read_csv(io.StringIO(texto), sep=separador, dtype=str, header=None, engine='python', on_bad_lines='skip')
+    else:
+        df = pd.read_excel(f, header=None, dtype=str)
+        if len(df.columns) == 1 or df.iloc[:, 1:].isna().all().all():
+            texto_esmagado = df.iloc[:, 0].dropna().astype(str).str.cat(sep='\n')
+            separador = ';' if ';' in texto_esmagado.split('\n')[0] else ','
+            df = pd.read_csv(io.StringIO(texto_esmagado), sep=separador, dtype=str, header=None, engine='python', on_bad_lines='skip')
     
     idx_cabecalho = encontrar_cabecalho(df)
     
@@ -87,11 +100,11 @@ def processar_dataframe(df, col_nota, col_data, col_valor):
     return res.groupby(['nota', 'data'], as_index=False)['valor'].sum()
 
 # --- INTERFACE GRÁFICA ---
-st.warning("⚠️ **INSTRUÇÃO:** Lembre-se de salvar os arquivos originais em formato **.xlsx** (Pasta de Trabalho do Excel) antes de inseri-los no sistema.")
+st.info("💡 **Dica:** O sistema aceita arquivos originais em formato **.xlsx, .xls ou .csv**.")
 
 c1, c2 = st.columns(2)
-with c1: f_sefaz = st.file_uploader("1. Envie a Planilha da SEFAZ (.xlsx ou .xls)", type=["xlsx", "xls"])
-with c2: f_dom = st.file_uploader("2. Envie a Planilha da DOMÍNIO (.xlsx ou .xls)", type=["xlsx", "xls"])
+with c1: f_sefaz = st.file_uploader("1. Envie a Planilha da SEFAZ", type=["xlsx", "xls", "csv"])
+with c2: f_dom = st.file_uploader("2. Envie a Planilha da DOMÍNIO", type=["xlsx", "xls", "csv"])
 
 if f_sefaz and f_dom:
     try:
@@ -102,13 +115,11 @@ if f_sefaz and f_dom:
         st.markdown("### ⚙️ Identificação das Colunas")
         st.write("O sistema localizou as colunas automaticamente. Caso alguma esteja incorreta, ajuste nas caixas abaixo:")
         
-        # Pré-identificação SEFAZ
         cols_s = list(df_s.columns)
         def_s_n = next((i for i, c in enumerate(cols_s) if "CHAVE" in normalizar(c) or "NOTA" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
         def_s_d = next((i for i, c in enumerate(cols_s) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c)), 0)
         def_s_v = next((i for i, c in enumerate(cols_s) if "VALOR" in normalizar(c) or "TOTAL" in normalizar(c)), 0)
 
-        # Pré-identificação DOMÍNIO
         cols_d = list(df_d.columns)
         def_d_n = next((i for i, c in enumerate(cols_d) if "NOTA" in normalizar(c) or "DOC" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
         def_d_d = next((i for i, c in enumerate(cols_d) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c)), 0)
@@ -132,7 +143,6 @@ if f_sefaz and f_dom:
                 ds = processar_dataframe(df_s, s_nota, s_data, s_valor)
                 dd = processar_dataframe(df_d, d_nota, d_data, d_valor)
 
-                # Ajuste de datas invertidas (Dia/Mês)
                 for idx, row in dd.iterrows():
                     nota_dom = row['nota']
                     data_dom = row['data']
@@ -157,10 +167,8 @@ if f_sefaz and f_dom:
                 with met2: st.metric("Soma Total DOMÍNIO", formatar_moeda_br(total_dominio))
                 with met3: st.metric("Diferença Global", formatar_moeda_br(diferenca_global), delta=f"{diferenca_global:,.2f} R$" if abs(diferenca_global) > 0.01 else None, delta_color="inverse" if diferenca_global != 0 else "normal")
 
-                # Filtro de divergências de valores
                 divergencias = m[abs(m['valor_sefaz'] - m['valor_dom']) > 0.01].copy()
                 
-                # Nomes de colunas amigáveis e de fácil compreensão no resultado final
                 divergencias.rename(columns={
                     'nota': 'Número da Nota',
                     'data': 'Data',
@@ -184,7 +192,12 @@ if f_sefaz and f_dom:
                     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                         df_final.to_excel(writer, index=False, sheet_name='Divergências')
                     
-                    st.download_button("📥 Baixar Planilha de Divergências", data=output.getvalue(), file_name="divergencias_sefaz_dominio.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    st.download_button(
+                        label="📥 Baixar Planilha de Divergências",
+                        data=output.getvalue(),
+                        file_name="divergencias_sefaz_dominio.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
                 else:
                     st.success("🎉 Excelente! Nenhuma divergência individual foi encontrada entre os arquivos.")
     except Exception as e:
