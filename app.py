@@ -4,88 +4,6 @@ import re
 import unicodedata
 import io
 
-st.set_page_config(page_title="Conciliador Fiscal: SEFAZ x Domínio", layout="wide")
-st.title("⚖️ Conciliador Fiscal: SEFAZ x Domínio")
-
-# --- UTILITÁRIOS ---
-def formatar_moeda_br(valor):
-    s = f"{valor:_.2f}"
-    s = s.replace('.', ',').replace('_', '.')
-    return f"R$ {s}"
-
-def normalizar(txt):
-    if pd.isna(txt): return ""
-    return unicodedata.normalize('NFD', str(txt)).encode('ascii', 'ignore').decode('utf-8').upper().strip()
-
-def limpar_valor(v):
-    if pd.isna(v): return 0.0
-    s = str(v).replace('R$', '').replace('"', '').replace('\xa0', '').replace(' ', '').strip()
-    if not s: return 0.0
-    if ',' in s: s = s.replace('.', '').replace(',', '.')
-    try: return float(re.sub(r'[^\d.]', '', s))
-    except: return 0.0
-
-def converter_data(d):
-    if pd.isna(d): return None
-    s = str(d).strip()
-    if s.replace('.', '').isdigit() and len(s) >= 5:
-        try: return pd.to_datetime(float(s), unit='D', origin='1899-12-30').date()
-        except: pass
-    if '.' in s and not s.replace('.', '').isdigit(): s = s.replace('.', '/')
-    if re.match(r'^\d{4}-\d{2}-\d{2}', s):
-        try: return pd.to_datetime(s, errors='coerce').date()
-        except: pass
-    try: return pd.to_datetime(s, dayfirst=True, errors='raise').date()
-    except: return pd.to_datetime(s, errors='coerce').date()
-
-def extrair_nota_limpa(n):
-    if pd.isna(n): return ""
-    s = str(n).strip()
-    s = re.sub(r'\D', '', s)
-    if len(s) == 44: s = s[25:34] 
-    return s.lstrip('0') if s else ""
-
-def encontrar_cabecalho(df):
-    termos = ["CHAVE", "NOTA", "DATA", "VALOR", "EMISSAO", "TOTAL", "NUMERO"]
-    for i in range(min(len(df), 50)):
-        linha = [normalizar(str(c)) for c in df.iloc[i]]
-        matches = sum(1 for c in linha if any(t in c for t in termos))
-        if matches >= 2: return i
-    return 0
-
-# --- MOTOR DE LEITURA COM BLOQUEIO DE CORRUPÇÃO ---
-def carregar_planilha(f):
-    f.seek(0)
-    conteudo = f.read()
-    df = None
-    
-    if f.name.lower().endswith('.csv'):
-        try: texto = conteudo.decode('utf-8')
-        except UnicodeDecodeError: texto = conteudo.decode('latin1', errors='replace')
-        primeira_linha = texto.split('\n')[0] if '\n' in texto else texto
-        separador = ';' if ';' in primeira_linha else ','
-        df = pd.read_csv(io.StringIO(texto), sep=separador, dtype=str, header=None, engine='python', on_bad_lines='skip')
-        
-    else:
-        # Checagem de Assinatura Binária
-        is_real_xls = conteudo.startswith(b'\xD0\xCF\x11\xE0')
-        is_real_xlsx = conteudo.startswith(b'PK')
-        
-        if is_real_xls or is_real_xlsx:
-            motor = 'openpyxl' if is_real_xlsx else 'xlrd'
-            try:
-                df = pd.read_excel(io.BytesIO(conteudo), header=None, dtype=str, engine=motor)
-                
-                # Motor de Descompactação SEFAZ
-                if len(df.columns) == 1 or df.iloc[:, 1:].isna().all().all():
-                    texto_esmagado = df.iloc[:, 0].dropna().astype(str).str.cat(sep='\n')
-                    if texto_esmagado.strip():
-                        separador = ';' if ';' in texto_esmagado.split('\n')[0] else ','import streamlit as st
-import pandas as pd
-import re
-import unicodedata
-import io
-
 st.set_page_config(page_title="Conciliador Fiscal Universal", layout="wide")
 st.title("⚖️ Conciliador Fiscal Universal")
 
@@ -128,7 +46,8 @@ def extrair_nota_limpa(n):
     return s.lstrip('0') if s else ""
 
 def encontrar_cabecalho(df):
-    termos = ["CHAVE", "NOTA", "DATA", "VALOR", "EMISSAO", "TOTAL", "NUMERO"]
+    # INCLUSÃO: "NUM" e "NFSE" para o radar capturar a linha 3 do Sieg automaticamente
+    termos = ["CHAVE", "NOTA", "DATA", "VALOR", "EMISSAO", "TOTAL", "NUMERO", "NUM", "NFSE"]
     for i in range(min(len(df), 50)):
         linha = [normalizar(str(c)) for c in df.iloc[i]]
         matches = sum(1 for c in linha if any(t in c for t in termos))
@@ -227,12 +146,13 @@ if f_origem and f_dom:
             st.markdown("### ⚙️ Identificação das Colunas")
             
             cols_o = list(df_o.columns)
-            def_o_n = next((i for i, c in enumerate(cols_o) if "CHAVE" in normalizar(c) or "NOTA" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
+            # INCLUSÃO DO 'NUM' E 'NFSE' PARA MAPEAMENTO DO SIEG
+            def_o_n = next((i for i, c in enumerate(cols_o) if "NUM" in normalizar(c) or "NFSE" in normalizar(c) or "CHAVE" in normalizar(c) or "NOTA" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
             def_o_d = next((i for i, c in enumerate(cols_o) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c)), 0)
             def_o_v = next((i for i, c in enumerate(cols_o) if "VALOR" in normalizar(c) or "TOTAL" in normalizar(c)), 0)
 
             cols_d = list(df_d.columns)
-            def_d_n = next((i for i, c in enumerate(cols_d) if "NOTA" in normalizar(c) or "DOC" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
+            def_d_n = next((i for i, c in enumerate(cols_d) if "NOTA" in normalizar(c) or "DOC" in normalizar(c) or "NUMERO" in normalizar(c) or "NUM" in normalizar(c)), 0)
             def_d_d = next((i for i, c in enumerate(cols_d) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c)), 0)
             def_d_v = next((i for i, c in enumerate(cols_d) if "VALOR" in normalizar(c) or "CONTABIL" in normalizar(c)), 0)
 
