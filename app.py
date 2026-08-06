@@ -9,9 +9,15 @@ st.title("⚖️ Conciliador Fiscal Universal")
 
 # --- UTILITÁRIOS ---
 def formatar_moeda_br(valor):
-    s = f"{valor:_.2f}"
-    s = s.replace('.', ',').replace('_', '.')
-    return f"R$ {s}"
+    try:
+        valor = float(valor)
+        # Formata no padrão internacional (ex: 18,493.42)
+        s = f"{valor:,.2f}"
+        # Aplica a trava de conversão segura para o padrão brasileiro
+        s = s.replace(",", "X").replace(".", ",").replace("X", ".")
+        return f"R$ {s}"
+    except:
+        return "R$ 0,00"
 
 def normalizar(txt):
     if pd.isna(txt): return ""
@@ -47,14 +53,12 @@ def extrair_nota_limpa(n):
 
 # --- DETECTOR DE CABEÇALHO CEGO DE ALTA PRECISÃO ---
 def encontrar_cabecalho(df):
-    # Nível 1: Tripla verificação (Removemos "TOTAL" para evitar falsos positivos no SIEG)
     termos_fortes = ["CHAVE", "NOTA", "DATA", "VALOR", "EMISSAO", "NUMERO", "NUM NFSE", "CNPJ"]
     for i in range(min(len(df), 50)):
         linha = [normalizar(str(c)) for c in df.iloc[i]]
         matches = sum(1 for c in linha if any(t in c for t in termos_fortes))
         if matches >= 3: return i
         
-    # Nível 2: Dupla verificação de contingência
     termos_simples = ["CHAVE", "NOTA", "DATA", "VALOR"]
     for i in range(min(len(df), 50)):
         linha = [normalizar(str(c)) for c in df.iloc[i]]
@@ -154,7 +158,6 @@ if f_origem and f_dom:
             st.markdown("### ⚙️ Identificação das Colunas")
             
             cols_o = list(df_o.columns)
-            # Seleção reajustada para ignorar falsos totais
             def_o_n = next((i for i, c in enumerate(cols_o) if "NUM NFSE" in normalizar(c) or "CHAVE" in normalizar(c) or "NOTA" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
             def_o_d = next((i for i, c in enumerate(cols_o) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c)), 0)
             def_o_v = next((i for i, c in enumerate(cols_o) if "VALOR" in normalizar(c)), 0)
