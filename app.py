@@ -45,16 +45,24 @@ def extrair_nota_limpa(n):
     if len(s) == 44: s = s[25:34] 
     return s.lstrip('0') if s else ""
 
+# --- DETECTOR DE CABEÇALHO CEGO DE ALTA PRECISÃO ---
 def encontrar_cabecalho(df):
-    # INCLUSÃO: "NUM" e "NFSE" para o radar capturar a linha 3 do Sieg automaticamente
-    termos = ["CHAVE", "NOTA", "DATA", "VALOR", "EMISSAO", "TOTAL", "NUMERO", "NUM", "NFSE"]
+    # Nível 1: Tripla verificação (Removemos "TOTAL" para evitar falsos positivos no SIEG)
+    termos_fortes = ["CHAVE", "NOTA", "DATA", "VALOR", "EMISSAO", "NUMERO", "NUM NFSE", "CNPJ"]
     for i in range(min(len(df), 50)):
         linha = [normalizar(str(c)) for c in df.iloc[i]]
-        matches = sum(1 for c in linha if any(t in c for t in termos))
+        matches = sum(1 for c in linha if any(t in c for t in termos_fortes))
+        if matches >= 3: return i
+        
+    # Nível 2: Dupla verificação de contingência
+    termos_simples = ["CHAVE", "NOTA", "DATA", "VALOR"]
+    for i in range(min(len(df), 50)):
+        linha = [normalizar(str(c)) for c in df.iloc[i]]
+        matches = sum(1 for c in linha if any(t in c for t in termos_simples))
         if matches >= 2: return i
     return 0
 
-# --- MOTOR DE LEITURA COM BLOQUEIO DE CORRUPÇÃO ---
+# --- MOTOR DE LEITURA BLINDADO ---
 def carregar_planilha(f):
     f.seek(0)
     conteudo = f.read()
@@ -146,10 +154,10 @@ if f_origem and f_dom:
             st.markdown("### ⚙️ Identificação das Colunas")
             
             cols_o = list(df_o.columns)
-            # INCLUSÃO DO 'NUM' E 'NFSE' PARA MAPEAMENTO DO SIEG
-            def_o_n = next((i for i, c in enumerate(cols_o) if "NUM" in normalizar(c) or "NFSE" in normalizar(c) or "CHAVE" in normalizar(c) or "NOTA" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
+            # Seleção reajustada para ignorar falsos totais
+            def_o_n = next((i for i, c in enumerate(cols_o) if "NUM NFSE" in normalizar(c) or "CHAVE" in normalizar(c) or "NOTA" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
             def_o_d = next((i for i, c in enumerate(cols_o) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c)), 0)
-            def_o_v = next((i for i, c in enumerate(cols_o) if "VALOR" in normalizar(c) or "TOTAL" in normalizar(c)), 0)
+            def_o_v = next((i for i, c in enumerate(cols_o) if "VALOR" in normalizar(c)), 0)
 
             cols_d = list(df_d.columns)
             def_d_n = next((i for i, c in enumerate(cols_d) if "NOTA" in normalizar(c) or "DOC" in normalizar(c) or "NUMERO" in normalizar(c) or "NUM" in normalizar(c)), 0)
