@@ -133,21 +133,20 @@ def processar_dataframe(df, col_nota, col_data, col_valor, tipo_operacao):
     res = res[res['nota'] != ""]
     
     if "Entradas" in tipo_operacao:
-        # Agrupa apenas por nota, ignorando divergência de datas
-        return res.groupby('nota', as_index=False).agg({'data': 'first', 'valor': 'sum'})
+        # Expurga a data da memória pois ela é irrelevante neste cruzamento
+        return res.groupby('nota', as_index=False)['valor'].sum()
     else:
-        # Agrupa por nota e data obrigatoriamente
+        # Mantém a data e agrupa de forma estrita
         res = res.dropna(subset=['data'])
         return res.groupby(['nota', 'data'], as_index=False)['valor'].sum()
 
 # --- INTERFACE GRÁFICA ---
 st.info("💡 **Atenção:** Arquivos defeituosos de alguns sistemas exigem reparo no Excel (Salvar Como .xlsx).")
 
-# Roteador de Regras de Negócio
 tipo_conciliacao = st.radio(
     "🔄 **Selecione o Tipo de Operação Fiscal:**", 
     ["1️⃣ Saídas / Serviços (Exige que a Data de Emissão e a Data Contábil sejam idênticas)", 
-     "2️⃣ Entradas (Cruza apenas pelo Número da Nota, permitindo Datas diferentes)"], 
+     "2️⃣ Entradas (Cruza apenas pelo Número da Nota, ocultando datas divergentes)"], 
     horizontal=False
 )
 
@@ -228,14 +227,11 @@ if f_origem and f_dom:
                     if "Entradas" in tipo_conciliacao:
                         divergencias.rename(columns={
                             'nota': 'Número da Nota',
-                            'data_origem': 'Emissão (Origem)',
-                            'data_dom': 'Competência (Domínio)',
                             'valor_origem': 'Valor Origem',
                             'valor_dom': 'Valor Domínio'
                         }, inplace=True)
-                        divergencias['Emissão (Origem)'] = pd.to_datetime(divergencias['Emissão (Origem)']).dt.strftime('%d/%m/%Y').fillna('Não Consta')
-                        divergencias['Competência (Domínio)'] = pd.to_datetime(divergencias['Competência (Domínio)']).dt.strftime('%d/%m/%Y').fillna('Não Consta')
-                        df_final = divergencias[['Número da Nota', 'Emissão (Origem)', 'Competência (Domínio)', 'Valor Origem', 'Valor Domínio']].reset_index(drop=True)
+                        divergencias = divergencias.sort_values(by=['Número da Nota'])
+                        df_final = divergencias[['Número da Nota', 'Valor Origem', 'Valor Domínio']].reset_index(drop=True)
                     else:
                         divergencias.rename(columns={
                             'nota': 'Número da Nota',
