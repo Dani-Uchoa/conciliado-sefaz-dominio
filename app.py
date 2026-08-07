@@ -49,9 +49,17 @@ def extrair_nota_limpa(n):
     if len(s) == 44: s = s[25:34] 
     return s.lstrip('0') if s else ""
 
+def extrair_ultimo_evento(txt):
+    if pd.isna(txt): return ""
+    s = str(txt).strip()
+    if not s: return ""
+    # Isola o último status separando pela vírgula
+    return s.split(',')[-1].strip()
+
 # --- DETECTOR DE CABEÇALHO ---
 def encontrar_cabecalho(df):
-    termos_fortes = ["CHAVE", "NOTA", "DATA", "VALOR", "EMISSAO", "NUMERO", "NUM NFSE", "CNPJ"]
+    # Adicionado "EVENTO" aos termos fortes para mapeamento automático
+    termos_fortes = ["CHAVE", "NOTA", "DATA", "VALOR", "EMISSAO", "NUMERO", "NUM NFSE", "CNPJ", "EVENTO"]
     for i in range(min(len(df), 50)):
         linha = [normalizar(str(c)) for c in df.iloc[i]]
         matches = sum(1 for c in linha if any(t in c for t in termos_fortes))
@@ -124,21 +132,26 @@ def carregar_planilha(f):
     df = df.iloc[idx_cabecalho+1:].reset_index(drop=True)
     return df
 
-# --- PROCESSAMENTO CONDICIONAL ---
-def processar_dataframe(df, col_nota, col_data, col_valor, tipo_operacao):
+# --- PROCESSAMENTO CONDICIONAL AVANÇADO ---
+def processar_dataframe(df, col_nota, col_data, col_valor, col_evento, tipo_operacao):
     res = pd.DataFrame()
     res['nota'] = df[col_nota].apply(extrair_nota_limpa)
     res['data'] = df[col_data].apply(converter_data)
     res['valor'] = df[col_valor].apply(limpar_valor)
+    
+    # Processa o Evento caso tenha sido mapeado
+    if col_evento:
+        res['evento'] = df[col_evento].apply(extrair_ultimo_evento)
+    else:
+        res['evento'] = ""
+        
     res = res[res['nota'] != ""]
     
     if "Entradas" in tipo_operacao:
-        # Expurga a data da memória pois ela é irrelevante neste cruzamento
-        return res.groupby('nota', as_index=False)['valor'].sum()
+        return res.groupby('nota', as_index=False).agg({'valor': 'sum', 'evento': 'last'})
     else:
-        # Mantém a data e agrupa de forma estrita
         res = res.dropna(subset=['data'])
-        return res.groupby(['nota', 'data'], as_index=False)['valor'].sum()
+        return res.groupby(['nota', 'data'], as_index=False).agg({'valor': 'sum', 'evento': 'last'})
 
 # --- INTERFACE GRÁFICA ---
 st.info("💡 **Atenção:** Arquivos defeituosos de alguns sistemas exigem reparo no Excel (Salvar Como .xlsx).")
@@ -169,6 +182,8 @@ if f_origem and f_dom:
             def_o_n = next((i for i, c in enumerate(cols_o) if "NUM NFSE" in normalizar(c) or "CHAVE" in normalizar(c) or "NOTA" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
             def_o_d = next((i for i, c in enumerate(cols_o) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c)), 0)
             def_o_v = next((i for i, c in enumerate(cols_o) if "VALOR" in normalizar(c)), 0)
+            # Rastreador do Evento Sieg
+            def_o_e = next((i for i, c in enumerate(cols_o) if "EVENTO" in normalizar(c)), None)
 
             cols_d = list(df_d.columns)
             def_d_n = next((i for i, c in enumerate(cols_d) if "NOTA" in normalizar(c) or "DOC" in normalizar(c) or "NUMERO" in normalizar(c) or "NUM" in normalizar(c)), 0)
@@ -178,9 +193,14 @@ if f_origem and f_dom:
             col1, col2 = st.columns(2)
             with col1:
                 st.info("📊 **Colunas da ORIGEM**")
-                o_nota = st.selectbox("Coluna do Número da Nota ou Chave (Origem)", cols_o, index=def_o_n, key="o_nota")
-                o_data = st.selectbox("Coluna da Data de Emissão (Origem)", cols_o, index=def_o_d, key="o_data")
-                o_valor = st.selectbox("Coluna do Valor da Nota (Origem)", cols_o, index=def_o_v, key="o_valor")
+                o_nota = st.selectbox("Coluna do Número da Nota ou Chave", cols_o, index=def_o_n, key="o_nota")
+                o_data = st.selectbox("Coluna da Data de Emissão", cols_o, index=def_o_d, key="o_data")
+                o_valor = st.selectbox("Coluna do Valor da Nota", cols_o, index=def_o_v, key="o_valor")
+                
+                # Dropdown opcional para capturar o evento. Permite ao usuário desativar se não existir.
+                opcoes_evento = ["(Nenhuma)"] + cols_o
+                idx_evento = (def_o_e + 1) if def_o_e is not None else 0
+                o_evento = st.selectbox("Coluna do Tipo de Evento (Opcional - Sieg)", opcoes_evento, index=idx_evento, key="o_evento")
             
             with col2:
                 st.info("📊 **Colunas da DOMÍNIO**")
@@ -190,8 +210,10 @@ if f_origem and f_dom:
 
             if st.button("🚀 Cruzar Dados e Buscar Divergências", type="primary", use_container_width=True):
                 with st.spinner("Cruzando informações fiscais..."):
-                    ds = processar_dataframe(df_o, o_nota, o_data, o_valor, tipo_conciliacao)
-                    dd = processar_dataframe(df_d, d_nota, d_data, d_valor, tipo_conciliacao)
+                    col_ev_origem = None if o_evento == "(Nenhuma)" else o_evento
+                    
+                    ds = processar_dataframe(df_o, o_nota, o_data, o_valor, col_ev_origem, tipo_conciliacao)
+                    dd = processar_dataframe(df_d, d_nota, d_data, d_valor, None, tipo_conciliacao)
 
                     if "Entradas" in tipo_conciliacao:
                         m = pd.merge(ds, dd, on='nota', how='outer', suffixes=('_origem', '_dom'))
@@ -205,11 +227,16 @@ if f_origem and f_dom:
                                     data_sf = row_sf['data']
                                     if data_dom != data_sf and data_dom.day == data_sf.month and data_dom.month == data_sf.day:
                                         dd.at[idx, 'data'] = data_sf
-                        dd = dd.groupby(['nota', 'data'], as_index=False)['valor'].sum()
+                        
+                        dd = dd.groupby(['nota', 'data'], as_index=False).agg({'valor': 'sum', 'evento': 'last'})
                         m = pd.merge(ds, dd, on=['nota', 'data'], how='outer', suffixes=('_origem', '_dom'))
 
                     m['valor_origem'] = m['valor_origem'].fillna(0)
                     m['valor_dom'] = m['valor_dom'].fillna(0)
+                    if 'evento_origem' in m.columns:
+                        m['evento_origem'] = m['evento_origem'].fillna("")
+                    else:
+                        m['evento_origem'] = ""
                     
                     total_origem = m['valor_origem'].sum()
                     total_dominio = m['valor_dom'].sum()
@@ -228,20 +255,29 @@ if f_origem and f_dom:
                         divergencias.rename(columns={
                             'nota': 'Número da Nota',
                             'valor_origem': 'Valor Origem',
-                            'valor_dom': 'Valor Domínio'
+                            'valor_dom': 'Valor Domínio',
+                            'evento_origem': 'Status (Origem)'
                         }, inplace=True)
                         divergencias = divergencias.sort_values(by=['Número da Nota'])
-                        df_final = divergencias[['Número da Nota', 'Valor Origem', 'Valor Domínio']].reset_index(drop=True)
+                        
+                        cols_finais = ['Número da Nota', 'Valor Origem', 'Valor Domínio']
+                        if o_evento != "(Nenhuma)": cols_finais.append('Status (Origem)')
+                        df_final = divergencias[cols_finais].reset_index(drop=True)
+                        
                     else:
                         divergencias.rename(columns={
                             'nota': 'Número da Nota',
                             'data': 'Data',
                             'valor_origem': 'Valor Origem',
-                            'valor_dom': 'Valor Domínio'
+                            'valor_dom': 'Valor Domínio',
+                            'evento_origem': 'Status (Origem)'
                         }, inplace=True)
                         divergencias = divergencias.sort_values(by=['Data', 'Número da Nota'])
                         divergencias['Data'] = pd.to_datetime(divergencias['Data']).dt.strftime('%d/%m/%Y').fillna('Não Consta')
-                        df_final = divergencias[['Data', 'Número da Nota', 'Valor Origem', 'Valor Domínio']].reset_index(drop=True)
+                        
+                        cols_finais = ['Data', 'Número da Nota', 'Valor Origem', 'Valor Domínio']
+                        if o_evento != "(Nenhuma)": cols_finais.append('Status (Origem)')
+                        df_final = divergencias[cols_finais].reset_index(drop=True)
                     
                     st.subheader("🔍 Detalhamento das Divergências Encontradas")
                     if not df_final.empty:
