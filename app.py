@@ -49,11 +49,16 @@ def extrair_nota_limpa(n):
     if len(s) == 44: s = s[25:34] 
     return s.lstrip('0') if s else ""
 
+# Filtro de Exceções de Status
 def extrair_ultimo_evento(txt):
     if pd.isna(txt): return ""
     s = str(txt).strip()
     if not s: return ""
-    return s.split(',')[-1].strip()
+    ultimo = s.split(',')[-1].strip()
+    teste = normalizar(ultimo)
+    if "DESC" in teste or "CANCEL" in teste:
+        return ultimo
+    return ""
 
 # --- DETECTOR DE CABEÇALHO ---
 def encontrar_cabecalho(df):
@@ -180,7 +185,6 @@ if f_origem and f_dom:
             def_o_d = next((i for i, c in enumerate(cols_o) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c)), 0)
             def_o_v = next((i for i, c in enumerate(cols_o) if "VALOR" in normalizar(c)), 0)
             
-            # Rastreador Silencioso do Evento (Foca no TIPO e evita CÓDIGO numérico)
             col_ev_origem = next((c for c in cols_o if "TIPO" in normalizar(c) and "EVENTO" in normalizar(c)), None)
             if not col_ev_origem:
                 col_ev_origem = next((c for c in cols_o if "EVENTO" in normalizar(c) and "CODIGO" not in normalizar(c)), None)
