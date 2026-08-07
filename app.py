@@ -11,9 +11,7 @@ st.title("⚖️ Conciliador Fiscal Universal")
 def formatar_moeda_br(valor):
     try:
         valor = float(valor)
-        # Formata no padrão internacional (ex: 18,493.42)
         s = f"{valor:,.2f}"
-        # Aplica a trava de conversão segura para o padrão brasileiro
         s = s.replace(",", "X").replace(".", ",").replace("X", ".")
         return f"R$ {s}"
     except:
@@ -51,7 +49,7 @@ def extrair_nota_limpa(n):
     if len(s) == 44: s = s[25:34] 
     return s.lstrip('0') if s else ""
 
-# --- DETECTOR DE CABEÇALHO CEGO DE ALTA PRECISÃO ---
+# --- DETECTOR DE CABEÇALHO ---
 def encontrar_cabecalho(df):
     termos_fortes = ["CHAVE", "NOTA", "DATA", "VALOR", "EMISSAO", "NUMERO", "NUM NFSE", "CNPJ"]
     for i in range(min(len(df), 50)):
@@ -66,7 +64,7 @@ def encontrar_cabecalho(df):
         if matches >= 2: return i
     return 0
 
-# --- MOTOR DE LEITURA BLINDADO ---
+# --- MOTOR DE LEITURA ---
 def carregar_planilha(f):
     f.seek(0)
     conteudo = f.read()
@@ -87,7 +85,6 @@ def carregar_planilha(f):
             motor = 'openpyxl' if is_real_xlsx else 'xlrd'
             try:
                 df = pd.read_excel(io.BytesIO(conteudo), header=None, dtype=str, engine=motor)
-                
                 if len(df.columns) == 1 or df.iloc[:, 1:].isna().all().all():
                     texto_esmagado = df.iloc[:, 0].dropna().astype(str).str.cat(sep='\n')
                     if texto_esmagado.strip():
@@ -103,22 +100,16 @@ def carregar_planilha(f):
             except Exception:
                 try: texto = conteudo.decode('utf-8')
                 except UnicodeDecodeError: texto = conteudo.decode('latin1', errors='replace')
-                
                 if '\t' in texto: sep = '\t'
                 elif ';' in texto: sep = ';'
                 else: sep = ','
                 df = pd.read_csv(io.StringIO(texto), sep=sep, dtype=str, header=None, engine='python', on_bad_lines='skip')
     
-    if df is None or df.empty:
-        return pd.DataFrame()
-        
+    if df is None or df.empty: return pd.DataFrame()
     idx_cabecalho = encontrar_cabecalho(df)
-    
-    if idx_cabecalho >= len(df):
-        return df
+    if idx_cabecalho >= len(df): return df
 
     nomes_colunas = [str(c).strip() if pd.notna(c) else f"Coluna_{i}" for i, c in enumerate(df.iloc[idx_cabecalho])]
-    
     vistos = {}
     nomes_unicos = []
     for nome in nomes_colunas:
@@ -133,16 +124,34 @@ def carregar_planilha(f):
     df = df.iloc[idx_cabecalho+1:].reset_index(drop=True)
     return df
 
-def processar_dataframe(df, col_nota, col_data, col_valor):
+# --- PROCESSAMENTO CONDICIONAL ---
+def processar_dataframe(df, col_nota, col_data, col_valor, tipo_operacao):
     res = pd.DataFrame()
     res['nota'] = df[col_nota].apply(extrair_nota_limpa)
     res['data'] = df[col_data].apply(converter_data)
     res['valor'] = df[col_valor].apply(limpar_valor)
-    res = res[res['nota'] != ""].dropna(subset=['data'])
-    return res.groupby(['nota', 'data'], as_index=False)['valor'].sum()
+    res = res[res['nota'] != ""]
+    
+    if "Entradas" in tipo_operacao:
+        # Agrupa apenas por nota, ignorando divergência de datas
+        return res.groupby('nota', as_index=False).agg({'data': 'first', 'valor': 'sum'})
+    else:
+        # Agrupa por nota e data obrigatoriamente
+        res = res.dropna(subset=['data'])
+        return res.groupby(['nota', 'data'], as_index=False)['valor'].sum()
 
 # --- INTERFACE GRÁFICA ---
 st.info("💡 **Atenção:** Arquivos defeituosos de alguns sistemas exigem reparo no Excel (Salvar Como .xlsx).")
+
+# Roteador de Regras de Negócio
+tipo_conciliacao = st.radio(
+    "🔄 **Selecione o Tipo de Operação Fiscal:**", 
+    ["1️⃣ Saídas / Serviços (Exige que a Data de Emissão e a Data Contábil sejam idênticas)", 
+     "2️⃣ Entradas (Cruza apenas pelo Número da Nota, permitindo Datas diferentes)"], 
+    horizontal=False
+)
+
+st.write("---")
 
 c1, c2 = st.columns(2)
 with c1: f_origem = st.file_uploader("1. Planilha de ORIGEM (Sieg, Prefeitura, SEFAZ...)", type=["xlsx", "xls", "csv"])
@@ -164,7 +173,7 @@ if f_origem and f_dom:
 
             cols_d = list(df_d.columns)
             def_d_n = next((i for i, c in enumerate(cols_d) if "NOTA" in normalizar(c) or "DOC" in normalizar(c) or "NUMERO" in normalizar(c) or "NUM" in normalizar(c)), 0)
-            def_d_d = next((i for i, c in enumerate(cols_d) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c)), 0)
+            def_d_d = next((i for i, c in enumerate(cols_d) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c) or "ENTRADA" in normalizar(c)), 0)
             def_d_v = next((i for i, c in enumerate(cols_d) if "VALOR" in normalizar(c) or "CONTABIL" in normalizar(c)), 0)
 
             col1, col2 = st.columns(2)
@@ -182,21 +191,26 @@ if f_origem and f_dom:
 
             if st.button("🚀 Cruzar Dados e Buscar Divergências", type="primary", use_container_width=True):
                 with st.spinner("Cruzando informações fiscais..."):
-                    ds = processar_dataframe(df_o, o_nota, o_data, o_valor)
-                    dd = processar_dataframe(df_d, d_nota, d_data, d_valor)
+                    ds = processar_dataframe(df_o, o_nota, o_data, o_valor, tipo_conciliacao)
+                    dd = processar_dataframe(df_d, d_nota, d_data, d_valor, tipo_conciliacao)
 
-                    for idx, row in dd.iterrows():
-                        nota_dom = row['nota']
-                        data_dom = row['data']
-                        match_s = ds[ds['nota'] == nota_dom]
-                        if not match_s.empty:
-                            for idx_sf, row_sf in match_s.iterrows():
-                                data_sf = row_sf['data']
-                                if data_dom != data_sf and data_dom.day == data_sf.month and data_dom.month == data_sf.day:
-                                    dd.at[idx, 'data'] = data_sf
+                    if "Entradas" in tipo_conciliacao:
+                        m = pd.merge(ds, dd, on='nota', how='outer', suffixes=('_origem', '_dom'))
+                    else:
+                        for idx, row in dd.iterrows():
+                            nota_dom = row['nota']
+                            data_dom = row['data']
+                            match_s = ds[ds['nota'] == nota_dom]
+                            if not match_s.empty:
+                                for idx_sf, row_sf in match_s.iterrows():
+                                    data_sf = row_sf['data']
+                                    if data_dom != data_sf and data_dom.day == data_sf.month and data_dom.month == data_sf.day:
+                                        dd.at[idx, 'data'] = data_sf
+                        dd = dd.groupby(['nota', 'data'], as_index=False)['valor'].sum()
+                        m = pd.merge(ds, dd, on=['nota', 'data'], how='outer', suffixes=('_origem', '_dom'))
 
-                    dd = dd.groupby(['nota', 'data'], as_index=False)['valor'].sum()
-                    m = pd.merge(ds, dd, on=['nota', 'data'], how='outer', suffixes=('_origem', '_dom')).fillna(0)
+                    m['valor_origem'] = m['valor_origem'].fillna(0)
+                    m['valor_dom'] = m['valor_dom'].fillna(0)
                     
                     total_origem = m['valor_origem'].sum()
                     total_dominio = m['valor_dom'].sum()
@@ -211,16 +225,27 @@ if f_origem and f_dom:
 
                     divergencias = m[abs(m['valor_origem'] - m['valor_dom']) > 0.01].copy()
                     
-                    divergencias.rename(columns={
-                        'nota': 'Número da Nota',
-                        'data': 'Data',
-                        'valor_origem': 'Valor Origem',
-                        'valor_dom': 'Valor Domínio'
-                    }, inplace=True)
-                    
-                    divergencias = divergencias.sort_values(by=['Data', 'Número da Nota'])
-                    divergencias['Data'] = pd.to_datetime(divergencias['Data']).dt.strftime('%d/%m/%Y')
-                    df_final = divergencias[['Data', 'Número da Nota', 'Valor Origem', 'Valor Domínio']].reset_index(drop=True)
+                    if "Entradas" in tipo_conciliacao:
+                        divergencias.rename(columns={
+                            'nota': 'Número da Nota',
+                            'data_origem': 'Emissão (Origem)',
+                            'data_dom': 'Competência (Domínio)',
+                            'valor_origem': 'Valor Origem',
+                            'valor_dom': 'Valor Domínio'
+                        }, inplace=True)
+                        divergencias['Emissão (Origem)'] = pd.to_datetime(divergencias['Emissão (Origem)']).dt.strftime('%d/%m/%Y').fillna('Não Consta')
+                        divergencias['Competência (Domínio)'] = pd.to_datetime(divergencias['Competência (Domínio)']).dt.strftime('%d/%m/%Y').fillna('Não Consta')
+                        df_final = divergencias[['Número da Nota', 'Emissão (Origem)', 'Competência (Domínio)', 'Valor Origem', 'Valor Domínio']].reset_index(drop=True)
+                    else:
+                        divergencias.rename(columns={
+                            'nota': 'Número da Nota',
+                            'data': 'Data',
+                            'valor_origem': 'Valor Origem',
+                            'valor_dom': 'Valor Domínio'
+                        }, inplace=True)
+                        divergencias = divergencias.sort_values(by=['Data', 'Número da Nota'])
+                        divergencias['Data'] = pd.to_datetime(divergencias['Data']).dt.strftime('%d/%m/%Y').fillna('Não Consta')
+                        df_final = divergencias[['Data', 'Número da Nota', 'Valor Origem', 'Valor Domínio']].reset_index(drop=True)
                     
                     st.subheader("🔍 Detalhamento das Divergências Encontradas")
                     if not df_final.empty:
