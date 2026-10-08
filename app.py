@@ -49,7 +49,6 @@ def extrair_nota_limpa(n):
     if len(s) == 44: s = s[25:34] 
     return s.lstrip('0') if s else ""
 
-# Filtro de Exceções de Status
 def extrair_ultimo_evento(txt):
     if pd.isna(txt): return ""
     s = str(txt).strip()
@@ -183,7 +182,9 @@ if f_origem and f_dom:
             cols_o = list(df_o.columns)
             def_o_n = next((i for i, c in enumerate(cols_o) if "NUM NFSE" in normalizar(c) or "CHAVE" in normalizar(c) or "NOTA" in normalizar(c) or "NUMERO" in normalizar(c)), 0)
             def_o_d = next((i for i, c in enumerate(cols_o) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c)), 0)
-            def_o_v = next((i for i, c in enumerate(cols_o) if "VALOR" in normalizar(c)), 0)
+            
+            # FILTRO DE EXCLUSÃO DO ICMS E BASE: Ignora as colunas de imposto na Origem
+            def_o_v = next((i for i, c in enumerate(cols_o) if "VALOR" in normalizar(c) and "ICMS" not in normalizar(c) and "BASE" not in normalizar(c)), 0)
             
             col_ev_origem = next((c for c in cols_o if "TIPO" in normalizar(c) and "EVENTO" in normalizar(c)), None)
             if not col_ev_origem:
@@ -192,7 +193,9 @@ if f_origem and f_dom:
             cols_d = list(df_d.columns)
             def_d_n = next((i for i, c in enumerate(cols_d) if "NOTA" in normalizar(c) or "DOC" in normalizar(c) or "NUMERO" in normalizar(c) or "NUM" in normalizar(c)), 0)
             def_d_d = next((i for i, c in enumerate(cols_d) if "DATA" in normalizar(c) or "EMISSAO" in normalizar(c) or "ENTRADA" in normalizar(c)), 0)
-            def_d_v = next((i for i, c in enumerate(cols_d) if "VALOR" in normalizar(c) or "CONTABIL" in normalizar(c)), 0)
+            
+            # FILTRO DE EXCLUSÃO DO ICMS NA DOMÍNIO (Trava de segurança preventiva)
+            def_d_v = next((i for i, c in enumerate(cols_d) if ("VALOR" in normalizar(c) or "CONTABIL" in normalizar(c)) and "ICMS" not in normalizar(c) and "BASE" not in normalizar(c)), 0)
 
             col1, col2 = st.columns(2)
             with col1:
